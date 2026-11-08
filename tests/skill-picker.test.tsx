@@ -449,7 +449,7 @@ test('no notice when GitHub has the same version as this build', async ($, on) =
   mock.env(on, { HOME: '/home/bobby' })
   const clock = mock.clock(on)
   mock.store(on)
-  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ version: '0.2.0' }) } }))
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ version: '0.3.0' }) } }))
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -457,3 +457,58 @@ test('no notice when GitHub has the same version as this build', async ($, on) =
   await ui.unmount()
 })
 
+
+test('the tip shows until a skill is clicked, and stays gone in later chats', async ($, on) => {
+  engine(on)
+  mock.env(on, { HOME: '/home/bobby' })
+  const saved: Record<string, unknown> = {}
+  on('store.get', (_, e) => ({ value: saved[e.key] }))
+  on('store.set', (_, e) => {
+    saved[e.key] = e.value
+
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Tip: click any skill/ })).toBeDefined()
+  await ui.press({ key: 'skill:grill-me' })
+  expect(await ui.find({ type: 'Text', text: /Tip: click any skill/ })).toBeUndefined()
+  expect(saved['click-tip-seen']).toBe(true)
+  await ui.unmount()
+})
+
+test('turning suggestions off stops Jev checks and is remembered', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on)
+  mock.env(on, { HOME: '/home/bobby', TYPESAFE_API_KEY: 'test-key' })
+  const saved: Record<string, unknown> = {}
+  on('store.get', (_, e) => ({ value: saved[e.key] }))
+  on('store.set', (_, e) => {
+    saved[e.key] = e.value
+
+    return { value: undefined }
+  })
+  let calls = 0
+  on('http.fetch', (_, e) => {
+    if (e.url.includes('raw.githubusercontent.com')) return { value: { status: 404, ok: false, headers: {}, text: '' } }
+    calls += 1
+    const reply = {
+      answers: { q0: { type: 'choice', choice: 'engineering_debug', probabilities: { engineering_debug: 0.9 } } },
+      usage: { input_tokens: 100 },
+    }
+
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(reply) } }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ key: 'suggestions-switch' }))?.text).toBe('Suggestions: On')
+  await ui.press({ key: 'suggestions-switch' })
+  expect((await ui.find({ key: 'suggestions-switch' }))?.text).toBe('Suggestions: Off')
+  expect(saved['suggestions-on']).toBe(false)
+  await ui.unmount()
+
+  await typeInto($, 'my login page throws a 500 after deploy')
+  await clock.advance(1000)
+  expect(calls).toBe(0)
+})

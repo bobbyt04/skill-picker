@@ -47,12 +47,17 @@ let typingTimer: Timer | null = null
 let lastChecked = ''
 
 // This build's version; keep it equal to .claude-plugin/plugin.json.
-const VERSION = '0.2.1'
+const VERSION = '0.3.0'
 // Like gstack: check GitHub for a newer version at most twice a day, and say
 // so in the panel. Nothing about the person is sent; it is a plain download.
 const LATEST_URL = 'https://raw.githubusercontent.com/bobbyt04/skill-picker/main/.claude-plugin/plugin.json'
 const UPDATE_CHECK_MS = 12 * 60 * 60 * 1000
 const UPDATE_STORE_KEY = 'update-check'
+// Kept in $.store, so they hold across chats.
+const SUGGESTIONS_STORE_KEY = 'suggestions-on'
+const TIP_STORE_KEY = 'click-tip-seen'
+const suggestionsOn = atom({ plugin: 'skill-picker', key: 'suggestionsOn' } as const, true)
+const tipSeen = atom({ plugin: 'skill-picker', key: 'tipSeen' } as const, false)
 const newerVersion = atom({ plugin: 'skill-picker', key: 'newerVersion' } as const, null, { shape: 'newer-1' })
 
 const totals = atom(
@@ -236,6 +241,7 @@ async function debugFile($: EngineInterface, name: string, text: string): Promis
 // with a toast saying so.
 async function useSkill($: EngineInterface, name: string, surface?: string): Promise<void> {
   await debug($, `click /${name} surface=${surface ?? '-'}`)
+  await hideTip($)
   let rest = ''
   try {
     rest = (await $.prompt.read()).text.replace(/^\/\S+\s*/, '')
@@ -346,6 +352,8 @@ async function recordCheck($: EngineInterface, seq: number, check: Check, pick: 
 }
 
 async function recommend($: EngineInterface, text: string): Promise<void> {
+  // Off: no check is made, so nothing is sent and nothing is spent.
+  if (!(await read($, suggestionsOn))) return
   const key = await $.env.get('TYPESAFE_API_KEY')
   await update($, hasKey, () => Boolean(key))
   if (!key) return
@@ -488,6 +496,22 @@ async function loadStored($: EngineInterface): Promise<void> {
   if (!stored) await $.store.set(HIDDEN_STORE_KEY, DEFAULT_HIDDEN)
   const used = strings(await $.store.get(RECENT_STORE_KEY))
   if (used) await update($, recent, () => used.slice(0, RECENT_MAX))
+  const on = await $.store.get(SUGGESTIONS_STORE_KEY)
+  await update($, suggestionsOn, () => on !== false)
+  const seen = await $.store.get(TIP_STORE_KEY)
+  await update($, tipSeen, () => seen === true)
+}
+
+async function setSuggestions($: EngineInterface, on: boolean): Promise<void> {
+  await update($, suggestionsOn, () => on)
+  await $.store.set(SUGGESTIONS_STORE_KEY, on)
+  if (!on) await dropIdea($)
+}
+
+async function hideTip($: EngineInterface): Promise<void> {
+  if (await read($, tipSeen)) return
+  await update($, tipSeen, () => true)
+  await $.store.set(TIP_STORE_KEY, true)
 }
 
 // Opens the panel for /skill-picker (and the plugin's own skill-picker:open).
@@ -630,6 +654,8 @@ export const register: Register = on => {
     const check = await read($, lastCheck)
     const sum = await read($, totals)
     const newer = await read($, newerVersion)
+    const isOn = await read($, suggestionsOn)
+    const seen = await read($, tipSeen)
 
     const visible = all.filter(r => !isHidden(r, hiddenList))
 
@@ -677,7 +703,9 @@ export const register: Register = on => {
     )
 
     // Header: the pixel banner, then a one-line summary.
-    const summary = `${visible.length} skills · ${keyed ? 'Jev suggestions on' : 'suggestions off'}`
+    // The switch says what it does; without a key it says how to turn it on.
+    let switchLabel = isOn ? 'Suggestions: On' : 'Suggestions: Off'
+    if (!keyed) switchLabel = 'Suggestions: need a key'
     const header = (
       <Box flexDirection="column" rowGap="xs">
         {Svg ? (
@@ -687,9 +715,24 @@ export const register: Register = on => {
             ▚▞ SKILLS ▚▞
           </Text>
         )}
-        <Text size="caption" dimColor>
-          {summary}
-        </Text>
+        <Box flexDirection="row" alignItems="center" justifyContent="space-between">
+          <Text size="caption" dimColor>
+            {visible.length} skills
+          </Text>
+          <Button
+            key="suggestions-switch"
+            label={switchLabel}
+            plain
+            dimColor={!isOn || !keyed}
+            onPress={() => (keyed ? setSuggestions($, !isOn) : undefined)}
+          />
+        </Box>
+        {!seen && (
+          <Box key="tip" flexDirection="row" alignItems="center" justifyContent="space-between" borderStyle="round" borderDimColor paddingX={1}>
+            <Text size="caption">Tip: click any skill to add it to your message.</Text>
+            <Button key="tip-close" label="Got it" plain dimColor onPress={() => hideTip($)} />
+          </Box>
+        )}
         {newer && (
           <Box flexDirection="row" alignItems="center" columnGap="xs" borderStyle="round" borderColor={t.accent} paddingX={1}>
             <Text size="caption" weight="semibold" color={t.accent}>
@@ -877,8 +920,11 @@ export const register: Register = on => {
       )
     })
 
-    let status = 'Pause while typing (4+ words) and Jev suggests a fitting skill.'
+    let status = isOn
+      ? 'Pause while typing (4+ words) and Jev suggests a fitting skill.'
+      : 'Suggestions are off. Turn them on at the top of the panel.'
     if (!keyed) status = 'Suggestions are off: set TYPESAFE_API_KEY, then start a new session.'
+    else if (!isOn) status = 'Suggestions are off. Turn them on at the top of the panel.'
     else if (check?.error) status = `Last Jev check failed: ${check.error}`
     else if (check) {
       const top = check.picked ? `top pick /${check.picked} at ${Math.round(check.probability * 100)}%` : 'no skill fit'

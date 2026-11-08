@@ -39,6 +39,10 @@ declare module 'claude-code' {
       totals: Shaped<Totals>
       /** A newer version on GitHub than this build, if any. */
       newerVersion: Shaped<string | null>
+      /** The person's switch for suggestions as they type; kept in $.store. */
+      suggestionsOn: boolean
+      /** Whether the "click a skill" tip was dismissed or used; kept in $.store. */
+      tipSeen: boolean
     }
   }
 }

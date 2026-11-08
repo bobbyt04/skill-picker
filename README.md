@@ -5,6 +5,7 @@ A **Skills panel** for Claude Code Desktop, with suggestions as you type.
 - **Every skill in one place:** your own skills, plugin skills and skill packs, grouped into folding sections with search.
 - **Click to use:** clicking a skill puts `/skill-name` at the front of your message.
 - **Suggestions as you type:** pause while typing a message of 4 or more words and [Jev](https://typesafe.ai), a cheap decision model, picks the skill that fits best. The pick shows above the prompt box and in the panel, with a match score and a **Use** button.
+- **Turn suggestions on or off:** the switch at the top of the panel. Off means no checks and no cost. Your choice is remembered.
 - **Hide what you don't use:** point at a skill or section and click **Hide**. The **Hidden** list at the bottom brings it back.
 - **Purple pixel art:** an animated banner, a spark and a match meter.
 
