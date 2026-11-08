@@ -1,6 +1,9 @@
 {
   "name": "skill-picker",
-  "owner": { "name": "bobbyt04" },
+  "description": "Skill Picker: a Skills panel for Claude Code with suggestions as you type",
+  "owner": {
+    "name": "bobbyt04"
+  },
   "plugins": [
     {
       "name": "skill-picker",
