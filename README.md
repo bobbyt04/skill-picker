@@ -44,6 +44,16 @@ The panel works as a skill browser without this step. Suggestions need a TypeSaf
 
 This is an early version, and updates are coming to make it better. Ideas and bug reports are welcome on the GitHub Issues page.
 
+When a new version is out, the panel shows **Update ready** at the top. To get it:
+
+```
+/plugin update skill-picker
+```
+
+Then restart Claude. To get updates automatically, turn on auto-update for this plugin in the `/plugin` menu.
+
+The update check downloads this repo's version number from GitHub at most twice a day. It sends nothing about you.
+
 ## License
 
 MIT

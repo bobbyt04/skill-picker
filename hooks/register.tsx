@@ -46,6 +46,15 @@ const PAUSE_MS = 600
 let typingTimer: Timer | null = null
 let lastChecked = ''
 
+// This build's version; keep it equal to .claude-plugin/plugin.json.
+const VERSION = '0.2.0'
+// Like gstack: check GitHub for a newer version at most twice a day, and say
+// so in the panel. Nothing about the person is sent; it is a plain download.
+const LATEST_URL = 'https://raw.githubusercontent.com/bobbyt04/skill-picker/main/.claude-plugin/plugin.json'
+const UPDATE_CHECK_MS = 12 * 60 * 60 * 1000
+const UPDATE_STORE_KEY = 'update-check'
+const newerVersion = atom({ plugin: 'skill-picker', key: 'newerVersion' } as const, null, { shape: 'newer-1' })
+
 const totals = atom(
   { plugin: 'skill-picker', key: 'totals' } as const,
   { checks: 0, inputTokens: 0, costUsd: 0 },
@@ -257,6 +266,36 @@ async function useSkill($: EngineInterface, name: string, surface?: string): Pro
   const next = [name, ...(await read($, recent)).filter(n => n !== name)].slice(0, RECENT_MAX)
   await update($, recent, () => next)
   await $.store.set(RECENT_STORE_KEY, next)
+}
+
+// "0.10.0" > "0.9.1": compare each number in turn.
+function isNewer(latest: string, current: string): boolean {
+  const a = latest.split('.').map(n => Number.parseInt(n, 10) || 0)
+  const b = current.split('.').map(n => Number.parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0)
+  }
+
+  return false
+}
+
+async function checkForUpdate($: EngineInterface): Promise<void> {
+  try {
+    const saved = (await $.store.get(UPDATE_STORE_KEY)) as { at?: number; latest?: string } | undefined
+    let latest = typeof saved?.latest === 'string' ? saved.latest : null
+    const now = Date.now()
+    if (!latest || typeof saved?.at !== 'number' || now - saved.at > UPDATE_CHECK_MS) {
+      const res = await $.http.fetch(LATEST_URL, { method: 'GET' })
+      if (!res.ok) return
+      const version = (JSON.parse(res.text) as { version?: unknown }).version
+      if (typeof version !== 'string') return
+      latest = version
+      await $.store.set(UPDATE_STORE_KEY, { at: now, latest })
+    }
+    await update($, newerVersion, () => (latest && isNewer(latest, VERSION) ? latest : null))
+  } catch {
+    // Offline or GitHub unreachable: no notice, try again next session.
+  }
 }
 
 function strings(value: unknown): string[] | null {
@@ -475,6 +514,7 @@ export const register: Register = on => {
     await refreshSkills($)
     const key = await $.env.get('TYPESAFE_API_KEY')
     await update($, hasKey, () => Boolean(key))
+    void checkForUpdate($)
     if (e.surface === 'desktop') void $.ui.open({ id: PANE, title: 'Skills' })
 
     return started
@@ -589,6 +629,7 @@ export const register: Register = on => {
     const pick = await read($, suggestion)
     const check = await read($, lastCheck)
     const sum = await read($, totals)
+    const newer = await read($, newerVersion)
 
     const visible = all.filter(r => !isHidden(r, hiddenList))
 
@@ -649,6 +690,16 @@ export const register: Register = on => {
         <Text size="caption" dimColor>
           {summary}
         </Text>
+        {newer && (
+          <Box flexDirection="row" alignItems="center" columnGap="xs" borderStyle="round" borderColor={t.accent} paddingX={1}>
+            <Text size="caption" weight="semibold" color={t.accent}>
+              Update ready: v{newer}
+            </Text>
+            <Text size="caption" dimColor>
+              run /plugin update skill-picker, then restart
+            </Text>
+          </Box>
+        )}
       </Box>
     )
 

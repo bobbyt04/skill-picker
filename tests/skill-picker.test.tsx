@@ -216,7 +216,9 @@ test('a weak pick and short replies show nothing', async ($, on) => {
   mock.env(on, { HOME: '/home/bobby', TYPESAFE_API_KEY: 'test-key' })
   mock.store(on)
   let calls = 0
-  on('http.fetch', () => {
+  on('http.fetch', (_, e) => {
+    // The panel's version check is not a Jev call.
+    if (e.url.includes('raw.githubusercontent.com')) return { value: { status: 404, ok: false, headers: {}, text: '' } }
     calls += 1
     const reply = {
       answers: { q0: { type: 'choice', choice: 'review', probabilities: { review: 0.2, none: 0.7 } } },
@@ -301,7 +303,9 @@ test('ideas come from a pause in typing, before sending; sending clears them', a
   mock.env(on, { HOME: '/home/bobby', TYPESAFE_API_KEY: 'test-key' })
   mock.store(on)
   let calls = 0
-  on('http.fetch', () => {
+  on('http.fetch', (_, e) => {
+    // The panel's version check is not a Jev call.
+    if (e.url.includes('raw.githubusercontent.com')) return { value: { status: 404, ok: false, headers: {}, text: '' } }
     calls += 1
     const reply = {
       answers: { q0: { type: 'choice', choice: 'engineering_debug', probabilities: { engineering_debug: 0.9 } } },
@@ -373,7 +377,9 @@ test('once the person picks a skill themselves, no idea shows and the last one g
   mock.env(on, { HOME: '/home/bobby', TYPESAFE_API_KEY: 'test-key' })
   mock.store(on)
   let calls = 0
-  on('http.fetch', () => {
+  on('http.fetch', (_, e) => {
+    // The panel's version check is not a Jev call.
+    if (e.url.includes('raw.githubusercontent.com')) return { value: { status: 404, ok: false, headers: {}, text: '' } }
     calls += 1
     const reply = {
       answers: { q0: { type: 'choice', choice: 'engineering_debug', probabilities: { engineering_debug: 0.9 } } },
@@ -420,3 +426,34 @@ test('a pick still shows when its vote is split with near-twins and none is unli
   expect(await band.find({ type: 'Text', text: '/review' })).toBeDefined()
   await band.unmount()
 })
+
+test('a newer version on GitHub shows an update notice', async ($, on) => {
+  engine(on)
+  mock.env(on, { HOME: '/home/bobby' })
+  const clock = mock.clock(on)
+  mock.store(on)
+  on('http.fetch', (_, e) => {
+    const isVersion = e.url.includes('raw.githubusercontent.com')
+
+    return { value: { status: 200, ok: true, headers: {}, text: isVersion ? JSON.stringify({ version: '9.0.0' }) : '{}' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: 'Update ready: v9.0.0' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('no notice when GitHub has the same version as this build', async ($, on) => {
+  engine(on)
+  mock.env(on, { HOME: '/home/bobby' })
+  const clock = mock.clock(on)
+  mock.store(on)
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ version: '0.2.0' }) } }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Update ready/ })).toBeUndefined()
+  await ui.unmount()
+})
+

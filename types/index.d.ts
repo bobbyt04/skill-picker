@@ -37,6 +37,8 @@ declare module 'claude-code' {
       suggestion: Shaped<Suggestion | null>
       lastCheck: Shaped<Check | null>
       totals: Shaped<Totals>
+      /** A newer version on GitHub than this build, if any. */
+      newerVersion: Shaped<string | null>
     }
   }
 }
