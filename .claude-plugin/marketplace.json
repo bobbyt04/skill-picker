@@ -1,0 +1,11 @@
+{
+  "name": "skill-picker",
+  "owner": { "name": "bobbyt04" },
+  "plugins": [
+    {
+      "name": "skill-picker",
+      "source": "./",
+      "description": "A Skills panel beside the chat: every skill searchable, click to use, plus suggestions as you type"
+    }
+  ]
+}
