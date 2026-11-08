@@ -47,7 +47,7 @@ let typingTimer: Timer | null = null
 let lastChecked = ''
 
 // This build's version; keep it equal to .claude-plugin/plugin.json.
-const VERSION = '0.2.0'
+const VERSION = '0.2.1'
 // Like gstack: check GitHub for a newer version at most twice a day, and say
 // so in the panel. Nothing about the person is sent; it is a plain download.
 const LATEST_URL = 'https://raw.githubusercontent.com/bobbyt04/skill-picker/main/.claude-plugin/plugin.json'
@@ -490,7 +490,7 @@ async function loadStored($: EngineInterface): Promise<void> {
   if (used) await update($, recent, () => used.slice(0, RECENT_MAX))
 }
 
-// Opens the panel for /skill-picker (and the plugin's own skill-picker:skill-picker).
+// Opens the panel for /skill-picker (and the plugin's own skill-picker:open).
 async function openPanel($: EngineInterface): Promise<{ text: string }> {
   const rows = await refreshSkills($)
   await loadStored($)
@@ -521,10 +521,10 @@ export const register: Register = on => {
   })
 
   // /skill-picker, both as this session registers it and as the plugin's
-  // commands/skill-picker.md declares it (so a fresh chat knows the name
+  // skills/open declares it as /skill-picker:open (so a fresh chat knows the name
   // before the panel runs). Answered here, so no model call is made.
   on('command.run', { command: 'skill-picker' }, async $ => await openPanel($))
-  on('command.run', { command: 'skill-picker:skill-picker' }, async $ => await openPanel($))
+  on('command.run', { command: 'skill-picker:open' }, async $ => await openPanel($))
 
   // As the person types: once they pause on a draft worth checking, ask Jev.
   on('prompt.edit', async ($, e, next) => {

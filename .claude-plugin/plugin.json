@@ -1,11 +1,11 @@
 {
   "name": "skill-picker",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A Skills panel beside the chat: every skill searchable, click to use, plus Jev (a cheap decision model) suggesting a fitting skill as you type",
   "types": "./types/index.d.ts",
   "license": "MIT",
   "skills": [
-    "./skills/skill-picker"
+    "./skills/open"
   ],
   "author": {
     "name": "bobbyt04"

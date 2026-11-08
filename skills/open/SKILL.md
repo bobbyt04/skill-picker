@@ -1,5 +1,5 @@
 ---
-name: skill-picker
+name: open
 description: Open the Skills panel, with every skill searchable and click to use
 disable-model-invocation: true
 ---

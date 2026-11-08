@@ -16,7 +16,7 @@ In Claude Code, run:
 /plugin install skill-picker --marketplace bobbyt04/skill-picker
 ```
 
-Then start a new chat. The panel opens on the right. If it doesn't, type `/skill-picker`.
+Then start a new chat. The panel opens on the right. If it doesn't, type `/skill-picker:open`.
 
 Requires a recent Claude Code Desktop that supports mods.
 
