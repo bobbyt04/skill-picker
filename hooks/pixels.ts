@@ -5,8 +5,24 @@
 export const PALETTE = ['#4C1D95', '#5B21B6', '#6D28D9', '#7C3AED', '#8B5CF6', '#A78BFA', '#C4B5FD']
 export const ACCENT = '#8B5CF6'
 
-function shade(i: number): string {
-  return PALETTE[Math.max(0, Math.min(PALETTE.length - 1, i))] ?? ACCENT
+export type Theme = 'purple' | 'amber' | 'green' | 'mono'
+export const THEMES: Theme[] = ['purple', 'amber', 'green', 'mono']
+
+// Seven shades each, dark to light. The mid shades read on a white panel and
+// on a dark one; the two darkest are kept for small details.
+const PALETTES: Record<Theme, string[]> = {
+  purple: PALETTE,
+  amber: ['#78350F', '#92400E', '#B45309', '#D97706', '#F59E0B', '#FBBF24', '#FCD34D'],
+  green: ['#064E3B', '#065F46', '#047857', '#059669', '#10B981', '#34D399', '#6EE7B7'],
+  mono: ['#3F3F46', '#52525B', '#63636B', '#7C7C85', '#9A9AA3', '#B4B4BC', '#CFCFD6'],
+}
+
+export function paletteOf(theme: Theme): string[] {
+  return PALETTES[theme] ?? PALETTE
+}
+
+function shade(i: number, pal: string[] = PALETTE): string {
+  return pal[Math.max(0, Math.min(pal.length - 1, i))] ?? ACCENT
 }
 
 const STILL = '@media (prefers-reduced-motion: reduce){svg *{animation:none!important}}'
@@ -26,7 +42,28 @@ function hashText(text: string): number {
   return hash(...[...text].map(c => c.charCodeAt(0)))
 }
 
-// 3x5 pixel letters for the banner word.
+function rect(x: number, y: number, size: number, fill: string, cls = ''): string {
+  const c = cls ? ` class="${cls}"` : ''
+
+  return `<rect x="${x}" y="${y}" width="${size}" height="${size}" fill="${fill}"${c}/>`
+}
+
+// One pixel as a path: shorter than a rect when there are many.
+function dot(x: number, y: number, size: number, attrs = ''): string {
+  return `<path d="M${x} ${y}h${size}v${size}H${x}z"${attrs}/>`
+}
+
+function secs(n: number): string {
+  return `${Number(n.toFixed(2))}s`
+}
+
+const STRIP_COLS = 44
+const STRIP_ROWS = 7
+const STRIP_PX = 5
+const STRIP_SIZE = 4.2
+const STRIP_SCALE = 8
+
+// 3x5 pixel letters for the word in the strip.
 const GLYPHS: Record<string, string[]> = {
   S: ['111', '100', '111', '001', '111'],
   K: ['101', '101', '110', '101', '101'],
@@ -34,158 +71,175 @@ const GLYPHS: Record<string, string[]> = {
   L: ['100', '100', '100', '100', '111'],
 }
 
-type Cell = { x: number; y: number }
-
-// Each letter pixel is drawn `scale` cells square, so the word reads bold.
-function wordCells(word: string, scale: number): { cells: Cell[]; width: number; height: number } {
-  const cells: Cell[] = []
-  let x = 0
-  for (const ch of word) {
-    const g = GLYPHS[ch]
-    if (!g) continue
-    g.forEach((line, y) =>
-      [...line].forEach((bit, dx) => {
-        if (bit !== '1') return
-        for (let i = 0; i < scale; i++)
-          for (let j = 0; j < scale; j++) cells.push({ x: x + dx * scale + i, y: y * scale + j })
+// The strip pixels that spell SKILLS, centred, as "x,y" keys.
+const WORD: Set<string> = (() => {
+  const word = 'SKILLS'
+  const x0 = Math.floor((STRIP_COLS - (word.length * 4 - 1)) / 2)
+  const y0 = Math.floor((STRIP_ROWS - 5) / 2)
+  const cells = new Set<string>()
+  ;[...word].forEach((ch, i) =>
+    (GLYPHS[ch] ?? []).forEach((line, y) =>
+      [...line].forEach((bit, x) => {
+        if (bit === '1') cells.add(`${x0 + i * 4 + x},${y0 + y}`)
       }),
-    )
-    x += 4 * scale
+    ),
+  )
+
+  return cells
+})()
+
+function inWord(x: number, y: number): boolean {
+  return WORD.has(`${x},${y}`)
+}
+
+// The quiet plate behind the word: the field stays out of it so the letters read.
+const PLATE_FROM = Math.floor((STRIP_COLS - 23) / 2) - 1
+const PLATE_TO = PLATE_FROM + 24
+
+function inPlate(x: number): boolean {
+  return x >= PLATE_FROM && x <= PLATE_TO
+}
+
+function stripFrame(cls: string, style: string, body: string): string {
+  const w = STRIP_COLS * STRIP_PX
+  const h = STRIP_ROWS * STRIP_PX
+  // Its own size is wider than any panel: the panel draws it as wide as it
+  // has room for, so the strip always spans the full width.
+  const k = STRIP_SCALE
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" class="${cls}" viewBox="-0.4 -0.4 ${w} ${h}" width="${w * k}" height="${h * k}" shape-rendering="crispEdges">` +
+    `<style>${style}${STILL}</style>${body}</svg>`
+  )
+}
+
+// Waiting: a soft band of light drifts across, slanted and ragged because
+// every pixel runs a little early or late, and a few pixels breathe on their own.
+// The crest is a full-strength mid shade, not a pale one: over the faint
+// resting pixels that reads on a white panel as well as on a dark one.
+function stripIdle(pal: string[]): string {
+  const loop = 7
+  const cells: string[] = []
+  for (let y = 0; y < STRIP_ROWS; y++) {
+    for (let x = 0; x < STRIP_COLS; x++) {
+      const h = hash(x, y, 7)
+      const fill = shade(2 + (h % 3), pal)
+      const own = (h >>> 5) % 6 === 0
+      let attrs = ` fill="${fill}"`
+      if (inWord(x, y)) {
+        // The word stays solid; the drifting light brightens it as it passes.
+        const at = ((x / STRIP_COLS) * loop + y * 0.25) % loop
+        attrs = ` class="w" style="animation-delay:-${secs(loop - at)}"`
+      } else if (inPlate(x)) {
+        attrs += ' class="p"'
+      } else if (own) {
+        const k = (h >>> 9) % 3
+        attrs += ` class="t${k}" style="animation-delay:-${secs(((h >>> 12) % 37) / 10)}"`
+      } else {
+        const jitter = ((h >>> 12) % 100) / 100
+        const at = ((x / STRIP_COLS) * loop + y * 0.25 + jitter * 0.9) % loop
+        attrs += ` style="animation-delay:-${secs(loop - at)}"`
+      }
+      cells.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, attrs))
+    }
   }
+  const style =
+    `.pxi path{opacity:.4;animation:pxi-b ${loop}s ease-in-out infinite}` +
+    `@keyframes pxi-b{0%,34%,72%,100%{opacity:.34}46%{opacity:.85}52%{opacity:1;fill:${shade(4, pal)}}60%{opacity:.7}}` +
+    `.pxi .t0{animation:pxi-t 2.3s ease-in-out infinite}.pxi .t1{animation:pxi-t 3.1s ease-in-out infinite}.pxi .t2{animation:pxi-t 3.7s ease-in-out infinite}` +
+    `@keyframes pxi-t{0%,60%,100%{opacity:.34}80%{opacity:1;fill:${shade(4, pal)}}}` +
+    `.pxi .p{opacity:.12;animation:none}` +
+    `.pxi .w{opacity:1;fill:${shade(3, pal)};animation:pxi-w ${loop}s ease-in-out infinite}` +
+    `@keyframes pxi-w{0%,40%,64%,100%{fill:${shade(3, pal)}}52%{fill:${shade(5, pal)}}}`
 
-  return { cells, width: Math.max(0, x - scale), height: 5 * scale }
+  return stripFrame('pxi', style, cells.join(''))
 }
 
-function rect(x: number, y: number, size: number, fill: string, cls = ''): string {
-  const c = cls ? ` class="${cls}"` : ''
+// Checking: a bright head races left to right on a slant with a fading tail,
+// and each pixel flickers at its own pace under it.
+function stripChecking(pal: string[]): string {
+  const loop = 0.9
+  const slants: string[][] = []
+  // The word stays solid and flashes as the head passes over it.
+  const word: string[] = []
+  const span = STRIP_COLS + STRIP_ROWS - 1
+  for (let y = 0; y < STRIP_ROWS; y++) {
+    for (let x = 0; x < STRIP_COLS; x++) {
+      const h = hash(x, y, 23)
+      const k = h % 5
+      const attrs = k < 4 ? ` class="k${k}"` : ''
+      const slant = x + (STRIP_ROWS - 1 - y)
+      if (inWord(x, y)) {
+        word.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ` class="w" style="animation-delay:-${secs(loop - (slant / span) * loop)}"`))
+        continue
+      }
+      if (inPlate(x)) {
+        word.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ' class="p"'))
+        continue
+      }
+      ;(slants[slant] ??= []).push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, attrs))
+    }
+  }
+  const body =
+    slants.map((cells, i) => `<g style="animation-delay:-${secs(loop - (i / span) * loop)}">${cells.join('')}</g>`).join('') +
+    word.join('')
+  const flicker = [0.23, 0.31, 0.37, 0.43]
+    .map((d, i) => `.pxc .k${i}{animation:pxc-f ${d}s steps(2) infinite}`)
+    .join('')
+  const style =
+    `.pxc g{opacity:.5;fill:${shade(3, pal)};animation:pxc-s ${loop}s linear infinite}` +
+    `@keyframes pxc-s{0%{opacity:1;fill:${shade(6, pal)}}7%{opacity:1;fill:${shade(5, pal)}}22%{opacity:.75;fill:${shade(4, pal)}}50%{opacity:.34;fill:${shade(3, pal)}}100%{opacity:.16;fill:${shade(3, pal)}}}` +
+    `${flicker}@keyframes pxc-f{0%{opacity:1}100%{opacity:.55}}` +
+    `.pxc .p{fill:${shade(3, pal)};opacity:.12}` +
+    `.pxc .w{fill:${shade(3, pal)};animation:pxc-w ${loop}s linear infinite}` +
+    `@keyframes pxc-w{0%{fill:${shade(5, pal)}}30%,100%{fill:${shade(3, pal)}}}`
 
-  return `<rect x="${x}" y="${y}" width="${size}" height="${size}" fill="${fill}"${c}/>`
+  return stripFrame('pxc', style, body)
 }
 
-// One <path> of squares: far smaller than a rect per pixel.
-function squares(cells: Cell[], px: number, size: number): string {
-  return cells.map(c => `M${c.x * px} ${c.y * px}h${size}v${size}h-${size}z`).join('')
+// Found one: the strip fills from the left in half a second, then stays lit
+// while a crest of light rolls through and single pixels glint.
+function stripMatch(pal: string[]): string {
+  const wave = 1.5
+  const cols: string[] = []
+  for (let x = 0; x < STRIP_COLS; x++) {
+    const cells: string[] = []
+    for (let y = 0; y < STRIP_ROWS; y++) {
+      const h = hash(x, y, 41)
+      let attrs = ` fill="${shade(3 + (h % 3), pal)}"`
+      // The word glows pale on a dark plate inside the lit strip.
+      if (inWord(x, y)) attrs = ` fill="${shade(6, pal)}"`
+      else if (inPlate(x)) attrs = ` fill="${shade(1, pal)}"`
+      else if ((h >>> 5) % 4 === 0) attrs += ` class="q${(h >>> 9) % 5}"`
+      cells.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, attrs))
+    }
+    const t = x / STRIP_COLS
+    cols.push(
+      `<g class="in" style="animation-delay:${secs(t * 0.42)}"><g class="pu" style="animation-delay:-${secs(wave - t * wave)}">${cells.join('')}</g></g>`,
+    )
+  }
+  const glints = [1.1, 1.5, 1.9, 2.3, 2.9]
+    .map((d, i) => `.pxm .q${i}{animation:pxm-t ${d}s steps(1) infinite;animation-delay:-${secs(i * 0.37)}}`)
+    .join('')
+  const style =
+    `.pxm .in{animation:pxm-in .16s steps(3) both}@keyframes pxm-in{0%{opacity:0}100%{opacity:1}}` +
+    `.pxm .pu{animation:pxm-p ${wave}s ease-in-out infinite}@keyframes pxm-p{0%,100%{opacity:1}50%{opacity:.6}}` +
+    `${glints}@keyframes pxm-t{82%{fill:${shade(6, pal)}}}`
+
+  return stripFrame('pxm', style, cols.join(''))
 }
 
 /**
- * The panel's header, a dark pixel screen with five layers of motion:
- * a breathing purple glow, a field of pixels that each flicker at their own
- * pace, diagonal waves of light rolling through that field, the word SKILLS
- * lighting letter by letter under a moving sheen, and sparks drifting up.
+ * The panel's hero: one wide, short strip of pixels that shows what the
+ * suggester is doing. It drifts while waiting, races while checking, and
+ * lights up when it has found a skill.
  */
-export function banner(): string {
-  const cols = 64
-  const rows = 18
-  const px = 4
-  const size = px - 0.6
-  const word = wordCells('SKILLS', 2)
-  const x0 = Math.floor((cols - word.width) / 2)
-  const y0 = Math.floor((rows - word.height) / 2)
-  const w = cols * px
-  const hgt = rows * px
+export function strip(state: 'idle' | 'checking' | 'match', theme: Theme = 'purple'): string {
+  const pal = paletteOf(theme)
+  if (state === 'checking') return stripChecking(pal)
+  if (state === 'match') return stripMatch(pal)
 
-  // The field: pixels twinkle at one of four speeds, from one of two
-  // starting points, inside a diagonal band that pulses in turn. Pixels
-  // sharing all three share one <path>, which keeps the drawing small.
-  const bands = 6
-  const groups = new Map<string, { band: number; speed: number; start: number; fill: string; cells: Cell[] }>()
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const h = hash(x, y)
-      if (h % 100 >= 46) continue
-      const band = Math.min(bands - 1, Math.floor(((x + y * 1.6) / (cols + rows * 1.6)) * bands))
-      const speed = (h >>> 4) % 4
-      const start = (h >>> 8) % 2
-      const tone = h % 3
-      const id = `${band}.${speed}.${start}.${tone}`
-      const g = groups.get(id) ?? { band, speed, start, fill: shade(tone), cells: [] }
-      g.cells.push({ x, y })
-      groups.set(id, g)
-    }
-  }
-  const byBand: string[][] = Array.from({ length: bands }, () => [])
-  for (const g of groups.values()) {
-    byBand[g.band]?.push(
-      `<path fill="${g.fill}" class="t${g.speed}" style="animation-delay:-${g.start}s" d="${squares(g.cells, px, size)}"/>`,
-    )
-  }
-  const field = byBand.map((paths, i) => `<g class="d" style="animation-delay:${(i * 0.3).toFixed(2)}s">${paths.join('')}</g>`)
-
-  // The word, one path per letter so each can light in turn.
-  const letters: Cell[][] = []
-  for (const c of word.cells) {
-    const i = Math.floor(c.x / 8)
-    ;(letters[i] ??= []).push({ x: c.x + x0, y: c.y + y0 })
-  }
-  const allText = squares(word.cells.map(c => ({ x: c.x + x0, y: c.y + y0 })), px, size)
-  const letterPaths = letters
-    .map((cells, i) => `<path class="l" style="animation-delay:${(i * 0.14).toFixed(2)}s" d="${squares(cells, px, size)}"/>`)
-    .join('')
-
-  // Sparks: light pixels rising from the bottom edge and fading out.
-  const sparks = Array.from({ length: 12 }, (_, i) => {
-    const h = hash(i, 99)
-    const x = (h % (cols - 2)) * px + 1
-    const dur = 2.2 + ((h >>> 6) % 18) / 10
-    const delay = ((h >>> 12) % 40) / 10
-
-    return `<rect class="s" x="${x}" y="${hgt - 4}" width="2.4" height="2.4" fill="#DDD6FE" style="animation-duration:${dur.toFixed(1)}s;animation-delay:-${delay.toFixed(1)}s"/>`
-  }).join('')
-
-  const twinkles = [1.3, 1.7, 2.1, 2.5, 2.9, 3.4, 1.9, 2.7]
-    .map((d, i) => `.pb .t${i}{animation:tw ${d}s steps(3) infinite}`)
-    .join('')
-
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" class="pb" viewBox="-4 -4 ${w + 8} ${hgt + 8}" width="${w + 8}" height="${hgt + 8}" shape-rendering="crispEdges">` +
-    `<style>` +
-    `${twinkles}@keyframes tw{0%,100%{opacity:.18}45%{opacity:.18}55%{opacity:1;fill:#C4B5FD}70%{opacity:.5}}` +
-    `.pb .d{animation:roll 3.2s ease-in-out infinite}@keyframes roll{0%,100%{opacity:.55}12%{opacity:1}30%{opacity:.55}}` +
-    `.pb .l{fill:#EDE9FE;animation:lit 3.2s steps(4) infinite}@keyframes lit{0%,100%{fill:#EDE9FE}6%{fill:#FFFFFF}14%{fill:#C4B5FD}24%{fill:#EDE9FE}}` +
-    `.pb .gl{animation:breathe 3.2s ease-in-out infinite}@keyframes breathe{0%,100%{opacity:.35}50%{opacity:.85}}` +
-    `.pb .sh{animation:sheen 3.2s ease-in-out infinite}@keyframes sheen{0%{transform:translateX(-80px)}55%,100%{transform:translateX(${w + 80}px)}}` +
-    `.pb .s{opacity:0;animation:rise 3s linear infinite}@keyframes rise{0%{opacity:0;transform:translateY(0)}15%{opacity:1}100%{opacity:0;transform:translateY(-${hgt - 8}px)}}` +
-    `.pb .halo{animation:halo 4.8s ease-in-out infinite}@keyframes halo{0%,100%{opacity:.35}50%{opacity:.7}}` +
-    `${STILL}</style>` +
-    `<defs>` +
-    `<filter id="pbg" x="-10%" y="-40%" width="120%" height="180%"><feGaussianBlur stdDeviation="2.4"/></filter>` +
-    `<radialGradient id="pbr"><stop offset="0" stop-color="#7C3AED" stop-opacity=".55"/><stop offset="1" stop-color="#7C3AED" stop-opacity="0"/></radialGradient>` +
-    `<linearGradient id="pbs" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
-    `<clipPath id="pbc"><path d="${allText}"/></clipPath>` +
-    `</defs>` +
-    `<rect x="-4" y="-4" width="${w + 8}" height="${hgt + 8}" rx="6" fill="#140A2E"/>` +
-    `<ellipse class="halo" cx="${w / 2}" cy="${hgt / 2}" rx="${w * 0.42}" ry="${hgt * 0.62}" fill="url(#pbr)"/>` +
-    field.join('') +
-    sparks +
-    `<path class="gl" d="${allText}" fill="#A78BFA" filter="url(#pbg)"/>` +
-    letterPaths +
-    `<g clip-path="url(#pbc)"><rect class="sh" x="0" y="0" width="44" height="${hgt}" fill="url(#pbs)" opacity=".75"/></g>` +
-    `</svg>`
-  )
-}
-
-/** Eight purple pixels chasing round a square: Jev is reading. */
-export function spinner(): string {
-  const ring: Cell[] = [
-    { x: 0, y: 0 },
-    { x: 1, y: 0 },
-    { x: 2, y: 0 },
-    { x: 2, y: 1 },
-    { x: 2, y: 2 },
-    { x: 1, y: 2 },
-    { x: 0, y: 2 },
-    { x: 0, y: 1 },
-  ]
-  const cells = ring.map((c, i) => rect(c.x * 4, c.y * 4, 3.4, shade(3 + (i % 3)), `s${i}`)).join('')
-  // Negative delays start the chase mid-cycle, so the first frame already moves.
-  const delays = ring.map((_, i) => `.ps .s${i}{animation-delay:-${((7 - i) * 0.1).toFixed(1)}s}`).join('')
-
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" class="ps" viewBox="0 0 12 12" width="12" height="12" shape-rendering="crispEdges">` +
-    `<style>.ps rect{opacity:.2;animation:chase .8s linear infinite}@keyframes chase{0%{opacity:1}12.5%{opacity:.55}25%,100%{opacity:.2}}${delays}` +
-    `@media (prefers-reduced-motion: reduce){.ps rect{animation:none;opacity:.6}}</style>` +
-    `${cells}</svg>`
-  )
+  return stripIdle(pal)
 }
 
 // A pixel starburst: the centre holds steady while the arms twinkle outwards.
@@ -201,24 +255,25 @@ const SPARK = [
   '....#....',
 ]
 
-/** The suggestion's mark: a purple pixel spark that pops in, then twinkles. */
-export function spark(size = 18): string {
+/** A pixel spark that pops in, then twinkles: a suggestion, or a click that landed. */
+export function spark(size = 18, theme: Theme = 'purple'): string {
+  const pal = paletteOf(theme)
   const cells: string[] = []
   SPARK.forEach((line, y) =>
     [...line].forEach((ch, x) => {
       if (ch !== '#') return
       const ring = Math.max(Math.abs(x - 4), Math.abs(y - 4))
-      const fill = ring === 0 ? '#7C3AED' : shade(Math.min(5, 1 + ring))
+      const fill = ring === 0 ? shade(3, pal) : shade(Math.min(5, 1 + ring), pal)
       cells.push(rect(x * 2, y * 2, 1.8, fill, `r${ring}`))
     }),
   )
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" class="pk" viewBox="0 0 18 18" width="${size}" height="${size}" shape-rendering="crispEdges">` +
-    `<style>.pk g{transform-origin:9px 9px;animation:pop .45s steps(5) both}` +
-    `@keyframes pop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}` +
-    `.pk .r1,.pk .r2,.pk .r3,.pk .r4{animation:tw 1.6s steps(3) infinite}.pk .r2{animation-delay:.15s}.pk .r3{animation-delay:.3s}.pk .r4{animation-delay:.45s}` +
-    `@keyframes tw{0%,100%{opacity:1}50%{opacity:.55}}${STILL}</style>` +
+    `<style>.pk g{transform-origin:9px 9px;animation:pk-pop .45s steps(5) both}` +
+    `@keyframes pk-pop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}` +
+    `.pk .r1,.pk .r2,.pk .r3,.pk .r4{animation:pk-tw 1.6s steps(3) infinite}.pk .r2{animation-delay:.15s}.pk .r3{animation-delay:.3s}.pk .r4{animation-delay:.45s}` +
+    `@keyframes pk-tw{0%,100%{opacity:1}50%{opacity:.55}}${STILL}</style>` +
     `<g>${cells.join('')}</g></svg>`
   )
 }
@@ -227,46 +282,115 @@ export function spark(size = 18): string {
  * How strong a match is, as ten pixel blocks: the filled ones step in one by
  * one, then a shimmer runs along them.
  */
-export function meter(probability: number): string {
+export function meter(probability: number, theme: Theme = 'purple'): string {
+  const pal = paletteOf(theme)
   const blocks = 10
-  const filled = Math.max(0, Math.min(blocks, Math.round(probability * blocks)))
+  const p = Number.isFinite(probability) ? probability : 0
+  const filled = Math.max(0, Math.min(blocks, Math.round(p * blocks)))
   const cells = Array.from({ length: blocks }, (_, i) => {
-    if (i >= filled) return rect(i * 6, 0, 4.6, ACCENT, 'off')
-    const fill = shade(2 + Math.floor((i / blocks) * 5))
+    if (i >= filled) return rect(i * 6, 0, 4.6, shade(4, pal), 'off')
+    // Up to shade 5: the palest shade is too close to an empty block on white.
+    const fill = shade(2 + Math.floor((i / blocks) * 4), pal)
 
     return rect(i * 6, 0, 4.6, fill, `f${i}`)
   }).join('')
   const delays = Array.from(
     { length: filled },
-    (_, i) => `.pm rect.f${i}{animation-delay:${(i * 0.05).toFixed(2)}s,${(0.6 + i * 0.08).toFixed(2)}s}`,
+    (_, i) => `.pm rect.f${i}{animation-delay:${(i * 0.07).toFixed(2)}s,${(0.9 + i * 0.08).toFixed(2)}s}`,
   ).join('')
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" class="pm" viewBox="0 0 59 5" width="59" height="5" shape-rendering="crispEdges">` +
-    `<style>.pm .off{opacity:.3}.pm rect[class^=f]{animation:in .25s steps(2) both,shim 2.4s steps(3) infinite}` +
-    `@keyframes in{0%{opacity:0}100%{opacity:1}}@keyframes shim{0%,100%{opacity:1}8%{opacity:.45}16%{opacity:1}}` +
+    `<style>.pm .off{opacity:.25}.pm rect[class^=f]{animation:pm-in .2s steps(2) both,pm-sh 2.4s steps(3) infinite}` +
+    `@keyframes pm-in{0%{opacity:0}100%{opacity:1}}@keyframes pm-sh{0%,100%{opacity:1}8%{opacity:.45}16%{opacity:1}}` +
     `${delays}${STILL}</style>${cells}</svg>`
   )
 }
 
 /**
- * A section's mark: a 5x5 mirrored pixel tile, the same every time for the
- * same section, in a color of its own.
+ * Skills used on each of the last seven days, oldest first, as columns of up
+ * to five pixels. Today is the last column and a shade brighter; a day with
+ * nothing shows one faint pixel.
  */
-export function tile(group: string): string {
-  const h = hashText(group)
-  let color = `hsl(${250 + (h % 50)}, 70%, 58%)`
-  if (group === 'your-skills') color = '#8B5CF6'
-  else if (group === 'gstack') color = '#D97706'
-  else if (group === 'mattpocock-skills') color = '#0EA5E9'
+export function weekChart(counts: number[], theme: Theme = 'purple'): string {
+  const pal = paletteOf(theme)
+  const days = 7
+  const tall = 5
+  const clean = counts.slice(-days).map(n => (Number.isFinite(n) && n > 0 ? n : 0))
+  while (clean.length < days) clean.unshift(0)
+  const most = Math.max(...clean)
   const cells: string[] = []
-  for (let y = 0; y < 5; y++) {
+  clean.forEach((n, i) => {
+    const today = i === days - 1
+    const x = i * 4
+    if (n === 0) {
+      cells.push(rect(x, (tall - 1) * 4, 3.2, shade(4, pal), 'z'))
+
+      return
+    }
+    const high = Math.max(1, Math.round((n / most) * tall))
+    for (let j = 0; j < high; j++) {
+      const top = j === high - 1
+      const fill = shade(today ? (top ? 5 : 4) : 3, pal)
+      cells.push(rect(x, (tall - 1 - j) * 4, 3.2, fill, today ? (top ? 'n' : '') : 'o'))
+    }
+  })
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" class="pw" viewBox="0 0 27.2 19.2" width="27.2" height="19.2" shape-rendering="crispEdges">` +
+    `<style>.pw .z{opacity:.25}.pw .o{opacity:.65}.pw .n{animation:pw-n 2.4s ease-in-out infinite}@keyframes pw-n{0%,100%{opacity:1}50%{opacity:.55}}${STILL}</style>` +
+    `${cells.join('')}</svg>`
+  )
+}
+
+// "x_x" in pixels. The corners of each eye are marked so they can blink.
+const FACE = ['o.o.....o.o', '.#.......#.', 'o.o.###.o.o']
+
+/** The mark for a search with no results: a small x_x face that blinks slowly. */
+export function emptyFace(theme: Theme = 'purple'): string {
+  const pal = paletteOf(theme)
+  const cells: string[] = []
+  FACE.forEach((line, y) =>
+    [...line].forEach((ch, x) => {
+      if (ch === '.') return
+      cells.push(rect(x * 3, y * 3, 2.6, shade(4, pal), ch === 'o' ? 'e' : ''))
+    }),
+  )
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" class="pf" viewBox="0 0 32.6 8.6" width="32.6" height="8.6" shape-rendering="crispEdges">` +
+    `<style>.pf .e{animation:pf-b 4.5s steps(1) infinite}@keyframes pf-b{0%,100%{opacity:1}92%{opacity:.15}96%{opacity:1}}${STILL}</style>` +
+    `${cells.join('')}</svg>`
+  )
+}
+
+// Collections with a color of their own; every other tile follows the theme.
+const TILE_COLORS: Record<string, string> = {
+  gstack: '#F59E0B',
+  'mattpocock-skills': '#38BDF8',
+}
+
+/**
+ * A section's mark: a soft 3x3 block tile, light at the top and deeper at the
+ * bottom, with a slow glint. The same every time for the same section.
+ */
+export function tile(group: string, theme: Theme = 'purple'): string {
+  const color = TILE_COLORS[group] ?? shade(4, paletteOf(theme))
+  const h = hashText(group)
+  const cells: string[] = []
+  for (let y = 0; y < 3; y++) {
     for (let x = 0; x < 3; x++) {
-      if (((h >>> (y * 3 + x)) & 1) === 0 && !(x === 2 && y === 2)) continue
-      cells.push(rect(x * 2, y * 2, 1.8, color))
-      if (x < 2) cells.push(rect((4 - x) * 2, y * 2, 1.8, color))
+      const g = hash(h, x, y)
+      const opacity = Math.min(1, Math.max(0.16, [0.26, 0.55, 0.92][y]! + ((g % 5) - 2) * 0.07))
+      const cls = (g >>> 4) % 3 === 0 ? ` class="g${(g >>> 7) % 3}"` : ''
+      cells.push(`<rect x="${x * 3}" y="${y * 3}" width="2.8" height="2.8" fill="${color}" opacity="${Number(opacity.toFixed(2))}"${cls}/>`)
     }
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10" shape-rendering="crispEdges">${cells.join('')}</svg>`
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" class="pt" viewBox="0 0 8.8 8.8" width="12" height="12" shape-rendering="crispEdges">` +
+    `<style>.pt .g0{animation:pt-g 2.6s steps(3) infinite}.pt .g1{animation:pt-g 3.4s steps(3) -1.2s infinite}.pt .g2{animation:pt-g 4.1s steps(3) -2.3s infinite}` +
+    `@keyframes pt-g{85%{opacity:1}}${STILL}</style>` +
+    `${cells.join('')}</svg>`
+  )
 }

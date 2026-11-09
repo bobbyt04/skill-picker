@@ -6,7 +6,7 @@
  */
 export type SkillRow = { name: string; label: string; blurb: string; about: string; group: string }
 
-/** Jev's pick for the last message: the skill and how sure it was (0 to 1). */
+/** One of Jev's picks for the last message: the skill and how sure it was (0 to 1). */
 export type Suggestion = { skill: string; probability: number }
 
 /** One Jev check, as its response reported it. */
@@ -17,6 +17,12 @@ export type Check = {
   costUsd: number
   error?: string
 }
+
+/**
+ * Clicks kept on this computer: per skill, and per local day ('YYYY-MM-DD',
+ * the last 14 days). Never any prompt text.
+ */
+export type Usage = { counts: Record<string, number>; days: Record<string, number> }
 
 export type Totals = { checks: number; inputTokens: number; costUsd: number }
 
@@ -32,9 +38,16 @@ declare module 'claude-code' {
       hasKey: boolean
       /** A Jev check is in flight. */
       checking: boolean
-      /** Skills used from the panel, newest first; kept in $.store too. */
-      recent: Shaped<string[]>
-      suggestion: Shaped<Suggestion | null>
+      /** Pinned skill names, in the order pinned; kept in $.store too. */
+      favorites: Shaped<string[]>
+      /** Kept in $.store too. */
+      usage: Shaped<Usage>
+      /** The pixel art's colors; kept in $.store too. */
+      theme: 'purple' | 'amber' | 'green' | 'mono'
+      /** The skill just clicked, whose row says "added" for a moment; '' when none. */
+      added: string
+      /** Up to three picks from the last check, likeliest first; empty when none. */
+      picks: Shaped<Suggestion[]>
       lastCheck: Shaped<Check | null>
       totals: Shaped<Totals>
       /** A newer version on GitHub than this build, if any. */
