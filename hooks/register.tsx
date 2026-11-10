@@ -3,7 +3,7 @@ import type { CommandInfo, EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Check, SkillRow, Suggestion, Usage } from '../types'
 
-import { THEMES, emptyFace, meter, spark, strip, tile, weekChart } from './pixels'
+import { THEMES, emptyFace, meter, spark, strip, swatch, tile, weekChart } from './pixels'
 import type { Theme } from './pixels'
 
 const PANE = 'skill-picker'
@@ -62,7 +62,7 @@ let typingTimer: Timer | null = null
 let lastChecked = ''
 
 // This build's version; keep it equal to .claude-plugin/plugin.json.
-export const VERSION = '0.4.0'
+export const VERSION = '0.4.1'
 // Like gstack: check GitHub for a newer version at most twice a day, and say
 // so in the panel. Nothing about the person is sent; it is a plain download.
 const LATEST_URL = 'https://raw.githubusercontent.com/bobbyt04/skill-picker/main/.claude-plugin/plugin.json'
@@ -762,6 +762,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const Svg = e.surface === 'terminal' ? null : $.ui.resolve(e).Svg
+    const Select = e.surface === 'mobile' ? null : $.ui.resolve(e).Select
     const hover = hoverTint(e.surface)
     const all = await read($, skills)
     const q = await read($, query)
@@ -805,7 +806,7 @@ export const register: Register = on => {
     // One skill on one line: the command, then what it does in grey. The
     // row lights on hover, and Pin and Hide appear at the right. Just
     // clicked, it says "added" for a moment instead.
-    const row = (r: SkillRow, prefix: string) => (
+    const row = (r: SkillRow, prefix: string, name = r.name) => (
       <Box
         key={`${prefix}row:${r.name}`}
         flexDirection="row"
@@ -816,7 +817,7 @@ export const register: Register = on => {
       >
         <Box flexShrink={0}>
           <Button key={`${prefix}skill:${r.name}`} plain onPress={press => useSkill($, r.name, press.surface)}>
-            <Text mono>{`/${r.name}`}</Text>
+            <Text mono>{`/${name}`}</Text>
           </Button>
         </Box>
         {justAdded === r.name ? (
@@ -1046,16 +1047,23 @@ export const register: Register = on => {
 
               return (
                 <Box key={`group:${g}`} flexDirection="column" rowGap="xs">
+                  <Box key={`head:${g}`} flexDirection="row" alignItems="center" columnGap="sm" paddingX="sm">
+                    {/* The tile sits outside the hover box: the desktop drops a drawing inside one. */}
+                    {Svg && (
+                      <Box flexShrink={0}>
+                        <Svg source={tile(g, look)} alt={`${groupTitle(g)} section`} />
+                      </Box>
+                    )}
                   <Box
-                    key={`head:${g}`}
                     flexDirection="row"
                     alignItems="center"
                     justifyContent="space-between"
-                    paddingX="sm"
+                    flexGrow={1}
+                    flexShrink={1}
+                    minWidth={0}
                     hover={{ backgroundColor: hover }}
                   >
                     <Box flexDirection="row" alignItems="center" columnGap="xs" flexShrink={1}>
-                      {Svg && <Svg source={tile(g, look)} alt=" " width={12} height={12} />}
                       <Button
                         key={`toggle:${g}`}
                         plain
@@ -1082,9 +1090,11 @@ export const register: Register = on => {
                       </Text>
                     </Box>
                   </Box>
+                  </Box>
                   {isOpen && (
                     <Box flexDirection="column" marginBottom="sm">
-                      {inGroup.map(r => row(r, ''))}
+                      {/* The heading already names the plugin, so the row drops it. */}
+                      {inGroup.map(r => row(r, '', r.name.slice(r.name.indexOf(':') + 1)))}
                     </Box>
                   )}
                 </Box>
@@ -1141,16 +1151,33 @@ export const register: Register = on => {
             {`${usedThisWeek} ${usedThisWeek === 1 ? 'skill' : 'skills'} used this week`}
           </Text>
         </Box>
-        <Box flexDirection="row" alignItems="center" columnGap="sm">
-          {THEMES.map(name => (
-            <Button
-              key={`theme:${name}`}
-              label={`${name.slice(0, 1).toUpperCase()}${name.slice(1)}`}
-              plain
-              dimColor={name !== look}
-              onPress={() => setTheme($, name)}
-            />
-          ))}
+        <Box flexDirection="row" alignItems="center" columnGap="sm" flexWrap="wrap">
+          {Svg && Select ? (
+            <Box key="theme-chips" flexDirection="row" alignItems="center" columnGap="xs">
+              {/* A Button cannot hold a drawing, so the chips show the colors and the Select picks one. */}
+              {THEMES.map(name => (
+                <Svg key={`chip:${name}`} source={swatch(name, name === look)} alt={`${name} colors`} />
+              ))}
+              <Select
+                key="theme"
+                options={THEMES.map(name => ({ value: name, label: `${name.slice(0, 1).toUpperCase()}${name.slice(1)}` }))}
+                value={look}
+                onSelect={value => {
+                  if (isTheme(value)) return setTheme($, value)
+                }}
+              />
+            </Box>
+          ) : (
+            THEMES.map(name => (
+              <Button
+                key={`theme:${name}`}
+                label={`${name.slice(0, 1).toUpperCase()}${name.slice(1)}`}
+                plain
+                dimColor={name !== look}
+                onPress={() => setTheme($, name)}
+              />
+            ))
+          )}
         </Box>
         <Text key="status" size="caption" dimColor>
           {status}

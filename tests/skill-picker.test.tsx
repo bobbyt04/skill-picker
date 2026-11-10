@@ -146,7 +146,7 @@ test('a row inserts the full command, and search spans sections', async ($, on) 
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'toggle:engineering' })
-  expect((await ui.find({ key: 'skill:engineering:debug' }))?.text).toBe('/engineering:debug')
+  expect((await ui.find({ key: 'skill:engineering:debug' }))?.text).toBe('/debug')
   await ui.press({ key: 'skill:engineering:debug' })
   expect(box.text).toBe('/engineering:debug my login page 500s')
   expect(await ui.find({ key: 'top:skill:engineering:debug' })).toBeDefined()
@@ -711,7 +711,7 @@ test('the color theme recolors the pixel art and is remembered', async ($, on) =
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const art = async () => (await ui.findAll({ type: 'Svg' })).find(s => s.props.alt === 'Skill picker')?.props.source
   const purple = await art()
-  await ui.press({ key: 'theme:amber' })
+  await ui.select({ key: 'theme', value: 'amber' })
   expect(saved.theme).toBe('amber')
   expect(await art()).not.toBe(purple)
   await ui.unmount()
@@ -727,7 +727,7 @@ test('a saved theme is used in the next chat', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const art = async () => (await ui.findAll({ type: 'Svg' })).find(s => s.props.alt === 'Skill picker')?.props.source
   const mono = await art()
-  await ui.press({ key: 'theme:purple' })
+  await ui.select({ key: 'theme', value: 'purple' })
   expect(saved.theme).toBe('purple')
   expect(await art()).not.toBe(mono)
   await ui.unmount()
@@ -1053,5 +1053,5 @@ test('suggestions turned off as a check starts send nothing to Jev', async ($, o
 
 test('the build says the same version as plugin.json', () => {
   // A test may not load a .json file, so the number in .claude-plugin/plugin.json is repeated here.
-  expect(VERSION).toBe('0.4.0')
+  expect(VERSION).toBe('0.4.1')
 })

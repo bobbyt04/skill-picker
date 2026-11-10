@@ -57,33 +57,42 @@ function secs(n: number): string {
   return `${Number(n.toFixed(2))}s`
 }
 
-const STRIP_COLS = 44
-const STRIP_ROWS = 7
+const STRIP_COLS = 60
+const STRIP_ROWS = 13
 const STRIP_PX = 5
 const STRIP_SIZE = 4.2
 const STRIP_SCALE = 8
+// The strip is a small lit sign: a near-black plate, so it looks the same on a
+// light panel and a dark one, with the pixels glowing on it.
+const STRIP_PLATE = '#141318'
 
-// 3x5 pixel letters for the word in the strip.
+// Bold pixel letters, two pixels thick and nine tall: the word is the header,
+// the field of pixels its backdrop.
 const GLYPHS: Record<string, string[]> = {
-  S: ['111', '100', '111', '001', '111'],
-  K: ['101', '101', '110', '101', '101'],
-  I: ['111', '010', '010', '010', '111'],
-  L: ['100', '100', '100', '100', '111'],
+  S: ['.#####', '######', '##....', '#####.', '.#####', '....##', '....##', '######', '#####.'],
+  K: ['##..##', '##..##', '##.##.', '####..', '###...', '####..', '##.##.', '##..##', '##..##'],
+  I: ['##', '##', '##', '##', '##', '##', '##', '##', '##'],
+  L: ['##....', '##....', '##....', '##....', '##....', '##....', '##....', '######', '######'],
 }
+const WORD_TALL = 9
+const WORD_GAP = 2
+const WORD_WIDE = [...'SKILLS'].reduce((w, ch) => w + (GLYPHS[ch]?.[0]?.length ?? 0) + WORD_GAP, -WORD_GAP)
+const WORD_X = Math.floor((STRIP_COLS - WORD_WIDE) / 2)
+const WORD_Y = Math.floor((STRIP_ROWS - WORD_TALL) / 2)
 
-// The strip pixels that spell SKILLS, centred, as "x,y" keys.
-const WORD: Set<string> = (() => {
-  const word = 'SKILLS'
-  const x0 = Math.floor((STRIP_COLS - (word.length * 4 - 1)) / 2)
-  const y0 = Math.floor((STRIP_ROWS - 5) / 2)
-  const cells = new Set<string>()
-  ;[...word].forEach((ch, i) =>
-    (GLYPHS[ch] ?? []).forEach((line, y) =>
+// The strip pixels that spell SKILLS, centred: "x,y" to the letter's row.
+const WORD: Map<string, number> = (() => {
+  const cells = new Map<string, number>()
+  let left = WORD_X
+  for (const ch of 'SKILLS') {
+    const glyph = GLYPHS[ch] ?? []
+    glyph.forEach((line, y) =>
       [...line].forEach((bit, x) => {
-        if (bit === '1') cells.add(`${x0 + i * 4 + x},${y0 + y}`)
+        if (bit === '#') cells.set(`${left + x},${WORD_Y + y}`, y)
       }),
-    ),
-  )
+    )
+    left += (glyph[0]?.length ?? 0) + WORD_GAP
+  }
 
   return cells
 })()
@@ -92,12 +101,30 @@ function inWord(x: number, y: number): boolean {
   return WORD.has(`${x},${y}`)
 }
 
-// The quiet plate behind the word: the field stays out of it so the letters read.
-const PLATE_FROM = Math.floor((STRIP_COLS - 23) / 2) - 1
-const PLATE_TO = PLATE_FROM + 24
+// Whether the backdrop has a pixel here: everywhere but the plate's rounded
+// corners and a clear window around the word, so the letters read cleanly.
+function inField(x: number, y: number): boolean {
+  if (inWord(x, y)) return false
+  if ((x === 0 || x === STRIP_COLS - 1) && (y === 0 || y === STRIP_ROWS - 1)) return false
 
-function inPlate(x: number): boolean {
-  return x >= PLATE_FROM && x <= PLATE_TO
+  return !(x >= WORD_X - 1 && x <= WORD_X + WORD_WIDE && y >= WORD_Y - 1 && y <= WORD_Y + WORD_TALL)
+}
+
+// The letters: a dark shadow down and right, a pale-to-bright fill, and a
+// white copy on top (class "s") that each state fades in as its light passes.
+function wordCells(pal: string[], delayOf: (x: number, y: number) => string): { under: string; over: string } {
+  const rows = [6, 6, 6, 5, 5, 5, 4, 4, 4]
+  const shadow: string[] = []
+  const fill: string[] = []
+  const shine: string[] = []
+  for (const [key, row] of WORD) {
+    const [x, y] = key.split(',').map(Number) as [number, number]
+    if (!inWord(x + 1, y + 1)) shadow.push(dot((x + 1) * STRIP_PX, (y + 1) * STRIP_PX, STRIP_SIZE, ' class="d"'))
+    fill.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ` class="l" fill="${shade(rows[row] ?? 5, pal)}"`))
+    shine.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ` class="s" style="animation-delay:${delayOf(x, y)}"`))
+  }
+
+  return { under: shadow.join('') + fill.join(''), over: shine.join('') }
 }
 
 function stripFrame(cls: string, style: string, body: string): string {
@@ -106,10 +133,11 @@ function stripFrame(cls: string, style: string, body: string): string {
   // Its own size is wider than any panel: the panel draws it as wide as it
   // has room for, so the strip always spans the full width.
   const k = STRIP_SCALE
+  const word = `.${cls} .d{fill:${STRIP_PLATE};opacity:.8;animation:none}.${cls} .l{opacity:1;animation:none}.${cls} .s{fill:#fff;opacity:0}`
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" class="${cls}" viewBox="-0.4 -0.4 ${w} ${h}" width="${w * k}" height="${h * k}" shape-rendering="crispEdges">` +
-    `<style>${style}${STILL}</style>${body}</svg>`
+    `<style>${style}${word}${STILL}</style><rect x="-0.4" y="-0.4" width="${w}" height="${h}" rx="4" fill="${STRIP_PLATE}"/>${body}</svg>`
   )
 }
 
@@ -117,72 +145,54 @@ function stripFrame(cls: string, style: string, body: string): string {
 // every pixel runs a little early or late, and a few pixels breathe on their own.
 // The crest is a full-strength mid shade, not a pale one: over the faint
 // resting pixels that reads on a white panel as well as on a dark one.
+// As the band crosses the word, the letters gleam white.
 function stripIdle(pal: string[]): string {
   const loop = 7
   const cells: string[] = []
+  const at = (x: number, y: number, jitter = 0) => ((x / STRIP_COLS) * loop + y * 0.25 + jitter) % loop
   for (let y = 0; y < STRIP_ROWS; y++) {
     for (let x = 0; x < STRIP_COLS; x++) {
+      if (!inField(x, y)) continue
       const h = hash(x, y, 7)
-      const fill = shade(2 + (h % 3), pal)
-      const own = (h >>> 5) % 6 === 0
-      let attrs = ` fill="${fill}"`
-      if (inWord(x, y)) {
-        // The word stays solid; the drifting light brightens it as it passes.
-        const at = ((x / STRIP_COLS) * loop + y * 0.25) % loop
-        attrs = ` class="w" style="animation-delay:-${secs(loop - at)}"`
-      } else if (inPlate(x)) {
-        attrs += ' class="p"'
-      } else if (own) {
-        const k = (h >>> 9) % 3
-        attrs += ` class="t${k}" style="animation-delay:-${secs(((h >>> 12) % 37) / 10)}"`
+      let attrs = ` fill="${shade(2 + (h % 3), pal)}"`
+      if ((h >>> 5) % 6 === 0) {
+        attrs += ` class="t${(h >>> 9) % 3}" style="animation-delay:-${secs(((h >>> 12) % 37) / 10)}"`
       } else {
-        const jitter = ((h >>> 12) % 100) / 100
-        const at = ((x / STRIP_COLS) * loop + y * 0.25 + jitter * 0.9) % loop
-        attrs += ` style="animation-delay:-${secs(loop - at)}"`
+        attrs += ` style="animation-delay:-${secs(loop - at(x, y, (((h >>> 12) % 100) / 100) * 0.9))}"`
       }
       cells.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, attrs))
     }
   }
+  const word = wordCells(pal, (x, y) => `-${secs(loop - at(x, y))}`)
   const style =
     `.pxi path{opacity:.4;animation:pxi-b ${loop}s ease-in-out infinite}` +
     `@keyframes pxi-b{0%,34%,72%,100%{opacity:.34}46%{opacity:.85}52%{opacity:1;fill:${shade(4, pal)}}60%{opacity:.7}}` +
     `.pxi .t0{animation:pxi-t 2.3s ease-in-out infinite}.pxi .t1{animation:pxi-t 3.1s ease-in-out infinite}.pxi .t2{animation:pxi-t 3.7s ease-in-out infinite}` +
     `@keyframes pxi-t{0%,60%,100%{opacity:.34}80%{opacity:1;fill:${shade(4, pal)}}}` +
-    `.pxi .p{opacity:.12;animation:none}` +
-    `.pxi .w{opacity:1;fill:${shade(3, pal)};animation:pxi-w ${loop}s ease-in-out infinite}` +
-    `@keyframes pxi-w{0%,40%,64%,100%{fill:${shade(3, pal)}}52%{fill:${shade(5, pal)}}}`
+    `.pxi .s{animation:pxi-s ${loop}s ease-in-out infinite}@keyframes pxi-s{0%,45%,59%,100%{opacity:0}52%{opacity:.9}}`
 
-  return stripFrame('pxi', style, cells.join(''))
+  return stripFrame('pxi', style, cells.join('') + word.under + word.over)
 }
 
 // Checking: a bright head races left to right on a slant with a fading tail,
-// and each pixel flickers at its own pace under it.
+// each pixel flickers at its own pace under it, and the letters flash as it passes.
 function stripChecking(pal: string[]): string {
   const loop = 0.9
   const slants: string[][] = []
-  // The word stays solid and flashes as the head passes over it.
-  const word: string[] = []
   const span = STRIP_COLS + STRIP_ROWS - 1
+  const delay = (x: number, y: number) => `-${secs(loop - ((x + (STRIP_ROWS - 1 - y)) / span) * loop)}`
   for (let y = 0; y < STRIP_ROWS; y++) {
     for (let x = 0; x < STRIP_COLS; x++) {
-      const h = hash(x, y, 23)
-      const k = h % 5
-      const attrs = k < 4 ? ` class="k${k}"` : ''
-      const slant = x + (STRIP_ROWS - 1 - y)
-      if (inWord(x, y)) {
-        word.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ` class="w" style="animation-delay:-${secs(loop - (slant / span) * loop)}"`))
-        continue
-      }
-      if (inPlate(x)) {
-        word.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ' class="p"'))
-        continue
-      }
-      ;(slants[slant] ??= []).push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, attrs))
+      if (!inField(x, y)) continue
+      const k = hash(x, y, 23) % 5
+      ;(slants[x + (STRIP_ROWS - 1 - y)] ??= []).push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, k < 4 ? ` class="k${k}"` : ''))
     }
   }
+  const word = wordCells(pal, delay)
   const body =
     slants.map((cells, i) => `<g style="animation-delay:-${secs(loop - (i / span) * loop)}">${cells.join('')}</g>`).join('') +
-    word.join('')
+    word.under +
+    word.over
   const flicker = [0.23, 0.31, 0.37, 0.43]
     .map((d, i) => `.pxc .k${i}{animation:pxc-f ${d}s steps(2) infinite}`)
     .join('')
@@ -190,33 +200,41 @@ function stripChecking(pal: string[]): string {
     `.pxc g{opacity:.5;fill:${shade(3, pal)};animation:pxc-s ${loop}s linear infinite}` +
     `@keyframes pxc-s{0%{opacity:1;fill:${shade(6, pal)}}7%{opacity:1;fill:${shade(5, pal)}}22%{opacity:.75;fill:${shade(4, pal)}}50%{opacity:.34;fill:${shade(3, pal)}}100%{opacity:.16;fill:${shade(3, pal)}}}` +
     `${flicker}@keyframes pxc-f{0%{opacity:1}100%{opacity:.55}}` +
-    `.pxc .p{fill:${shade(3, pal)};opacity:.12}` +
-    `.pxc .w{fill:${shade(3, pal)};animation:pxc-w ${loop}s linear infinite}` +
-    `@keyframes pxc-w{0%{fill:${shade(5, pal)}}30%,100%{fill:${shade(3, pal)}}}`
+    `.pxc .s{animation:pxc-h ${loop}s linear infinite}@keyframes pxc-h{0%{opacity:.95}35%,100%{opacity:0}}`
 
   return stripFrame('pxc', style, body)
 }
 
 // Found one: the strip fills from the left in half a second, then stays lit
-// while a crest of light rolls through and single pixels glint.
+// while a crest of light rolls through, single pixels glint and the word glows white.
 function stripMatch(pal: string[]): string {
   const wave = 1.5
   const cols: string[] = []
+  const word = new Map<number, string[]>()
+  for (const key of WORD.keys()) {
+    const [x, y] = key.split(',').map(Number) as [number, number]
+    const cells = word.get(x) ?? []
+    cells.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ` class="l" fill="${shade(6, pal)}"`))
+    word.set(x, cells)
+  }
   for (let x = 0; x < STRIP_COLS; x++) {
     const cells: string[] = []
     for (let y = 0; y < STRIP_ROWS; y++) {
+      const shadowed = inWord(x - 1, y - 1) && !inWord(x, y)
+      if (!inField(x, y)) {
+        if (shadowed) cells.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ' class="d"'))
+        continue
+      }
       const h = hash(x, y, 41)
       let attrs = ` fill="${shade(3 + (h % 3), pal)}"`
-      // The word glows pale on a dark plate inside the lit strip.
-      if (inWord(x, y)) attrs = ` fill="${shade(6, pal)}"`
-      else if (inPlate(x)) attrs = ` fill="${shade(1, pal)}"`
-      else if ((h >>> 5) % 4 === 0) attrs += ` class="q${(h >>> 9) % 5}"`
+      if ((h >>> 5) % 4 === 0) attrs += ` class="q${(h >>> 9) % 5}"`
       cells.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, attrs))
+      if (shadowed) cells.push(dot(x * STRIP_PX, y * STRIP_PX, STRIP_SIZE, ' class="d"'))
     }
     const t = x / STRIP_COLS
-    cols.push(
-      `<g class="in" style="animation-delay:${secs(t * 0.42)}"><g class="pu" style="animation-delay:-${secs(wave - t * wave)}">${cells.join('')}</g></g>`,
-    )
+    const lit = `<g class="pu" style="animation-delay:-${secs(wave - t * wave)}">${cells.join('')}</g>`
+    const glow = `<g class="gl" style="animation-delay:-${secs(wave - t * wave)}">${(word.get(x) ?? []).join('')}</g>`
+    cols.push(`<g class="in" style="animation-delay:${secs(t * 0.42)}">${lit}${glow}</g>`)
   }
   const glints = [1.1, 1.5, 1.9, 2.3, 2.9]
     .map((d, i) => `.pxm .q${i}{animation:pxm-t ${d}s steps(1) infinite;animation-delay:-${secs(i * 0.37)}}`)
@@ -224,6 +242,7 @@ function stripMatch(pal: string[]): string {
   const style =
     `.pxm .in{animation:pxm-in .16s steps(3) both}@keyframes pxm-in{0%{opacity:0}100%{opacity:1}}` +
     `.pxm .pu{animation:pxm-p ${wave}s ease-in-out infinite}@keyframes pxm-p{0%,100%{opacity:1}50%{opacity:.6}}` +
+    `.pxm .gl{animation:pxm-g ${wave}s ease-in-out infinite}@keyframes pxm-g{0%,100%{fill:#fff}50%{fill:${shade(5, pal)}}}` +
     `${glints}@keyframes pxm-t{82%{fill:${shade(6, pal)}}}`
 
   return stripFrame('pxm', style, cols.join(''))
@@ -337,7 +356,7 @@ export function weekChart(counts: number[], theme: Theme = 'purple'): string {
   })
 
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" class="pw" viewBox="0 0 27.2 19.2" width="27.2" height="19.2" shape-rendering="crispEdges">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" class="pw" viewBox="0 0 27.2 19.2" width="40.8" height="28.8" shape-rendering="crispEdges">` +
     `<style>.pw .z{opacity:.25}.pw .o{opacity:.65}.pw .n{animation:pw-n 2.4s ease-in-out infinite}@keyframes pw-n{0%,100%{opacity:1}50%{opacity:.55}}${STILL}</style>` +
     `${cells.join('')}</svg>`
   )
@@ -388,9 +407,25 @@ export function tile(group: string, theme: Theme = 'purple'): string {
   }
 
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" class="pt" viewBox="0 0 8.8 8.8" width="12" height="12" shape-rendering="crispEdges">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" class="pt" viewBox="0 0 8.8 8.8" width="14" height="14" shape-rendering="crispEdges">` +
     `<style>.pt .g0{animation:pt-g 2.6s steps(3) infinite}.pt .g1{animation:pt-g 3.4s steps(3) -1.2s infinite}.pt .g2{animation:pt-g 4.1s steps(3) -2.3s infinite}` +
     `@keyframes pt-g{85%{opacity:1}}${STILL}</style>` +
     `${cells.join('')}</svg>`
   )
+}
+
+/**
+ * A theme's color chip for the picker: four pixels of its palette, light to
+ * deep. The chosen one wears a ring.
+ */
+export function swatch(theme: Theme, isChosen: boolean): string {
+  const pal = paletteOf(theme)
+  const cells = [5, 4, 3, 2]
+    .map((s, i) => `<rect x="${3 + (i % 2) * 6.2}" y="${3 + Math.floor(i / 2) * 6.2}" width="5.8" height="5.8" fill="${shade(s, pal)}"/>`)
+    .join('')
+  const ring = isChosen
+    ? `<rect x="0.6" y="0.6" width="16.8" height="16.8" rx="3" fill="none" stroke="${shade(5, pal)}" stroke-width="1.2"/>`
+    : ''
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18">${cells}${ring}</svg>`
 }
